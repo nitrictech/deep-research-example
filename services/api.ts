@@ -222,19 +222,20 @@ async function handleReflect(message: ReflectTopicMessage) {
 
   console.log(`[Research] Parsing reflection:`, completion.choices[0].message.content!);
 
+  const reflection = completion.choices[0].message.content!;
   // Parse the reflection response
-  const reflection = JSON.parse(completion.choices[0].message.content!);
-  console.log(`[Research] Reflection analysis:`, reflection);
+  // const reflection = JSON.parse(completion.choices[0].message.content!);
+  // console.log(`[Research] Reflection analysis:`, reflection);
   
   // Only restart research if knowledge gaps were identified
-  if (reflection.knowledge_gap) {
-    console.log(`[Research] Found knowledge gap: ${reflection.knowledge_gap}\nFollowing up with: ${reflection.follow_up_query}`);
+  if (reflection !== "") {
+    console.log(`[Research] Found knowledge gap, following up with: ${reflection}`);
     await researchTopicPub.publish({
       ...message,
       remainingIterations: message.remainingIterations - 1,
       type: "create_query",
       topics: [...message.topics],
-      originalTopic: reflection.follow_up_query,
+      originalTopic: reflection,
       date: new Date().toISOString(),
     });
   } else {
