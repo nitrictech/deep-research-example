@@ -1,0 +1,13 @@
+name: deep-research
+services:
+    - basedir: ""
+      match: services/*.ts
+      runtime: deno
+      start: deno run --watch --allow-all $SERVICE_PATH
+batch-services: []
+websites: []
+runtimes:
+    deno:
+        dockerfile: ./deno.dockerfile
+        context: ""
+        args: {}
