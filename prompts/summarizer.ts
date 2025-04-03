@@ -1,5 +1,5 @@
-export default `<GOAL>
-Generate a high-quality summary of the provided context.
+export default (topic: string) => `<GOAL>
+Generate a high-quality summary of the provided context for the topic ${topic}
 </GOAL>
 
 <REQUIREMENTS>

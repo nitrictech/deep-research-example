@@ -4,13 +4,47 @@ import openai from "npm:openai";
 import queryPrompt from "../prompts/query.ts";
 import summarizerPrompt from "../prompts/summarizer.ts";
 import reflectionPrompt from "../prompts/reflect.ts";
-import converterPrompt from "../prompts/converter.ts";
+import TurndownService from "npm:turndown";
+import * as cheerio from "npm:cheerio";
 
 const OAI = new openai({
   // use ollama here
   baseURL: "http://localhost:11434/v1",
   apiKey: "ollama",
 });
+
+const turndownService = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced'
+});
+
+function cleanHtml(html: string): string {
+  const $ = cheerio.load(html);
+  
+  // Remove script and style tags
+  $('script, style, noscript, iframe, embed, object').remove();
+  
+  // Remove navigation elements
+  $('nav, header, footer, aside, .nav, .navigation, .menu, .sidebar').remove();
+  
+  // Remove ads and social media elements
+  $('.ad, .ads, .advertisement, .social, .share, .comments').remove();
+  
+  // Remove empty elements
+  $('*').each(function() {
+    if ($(this).text().trim() === '') {
+      $(this).remove();
+    }
+  });
+  
+  // Get the main content (prioritize article, main, or content areas)
+  let content = $('article, main, .article, .content, .post, .entry');
+  if (content.length === 0) {
+    content = $('body');
+  }
+  
+  return content.html() || '';
+}
 
 type TopicMessageTypes = "create_query" | "query" | "reflect" | "summarize";
 
@@ -19,6 +53,8 @@ interface ResearchTopicMessage<T extends TopicMessageTypes> {
   topic: string;
   // Build a list of previous summaries to be used to build up the final response
   summaries: string[];
+  // Track remaining iterations to prevent infinite loops
+  remainingIterations: number;
 }
 
 interface CreateQueryTopicMessage extends ResearchTopicMessage<"create_query"> {
@@ -52,6 +88,7 @@ const researchTopicPub = researchTopic.allow("publish");
 const researchBucket = bucket("research").allow("write");
 
 const MODEL = "llama3.2:3b";
+const MAX_ITERATIONS = 3;
 
 async function handleCreateQuery(message: CreateQueryTopicMessage) {
   console.log(`[Research] Starting new query for topic: ${message.topic}`);
@@ -96,19 +133,14 @@ async function handleQuery(message: PerformQueryTopicMessage) {
     html: result[0]?.html.substring(0, 200) + '...'
   });
 
-  // Use the converter prompt to convert the html to markdown
+  // Clean and convert HTML to markdown
   console.log(`[Research] Converting HTML to Markdown for URL: ${result[0]?.url}`);
-  console.log(`[Research] HTML content length: ${result[0]?.html.length}`);
+  console.log(`[Research] Original HTML length: ${result[0]?.html.length}`);
   
-  const completion = await OAI.chat.completions.create({
-    model: MODEL,
-    messages: [
-      { role: "system", content: converterPrompt },
-      { role: "user", content: result[0]?.html }
-    ],
-  });
-
-  const markdown = completion.choices[0].message.content!;
+  const cleanedHtml = cleanHtml(result[0]?.html);
+  console.log(`[Research] Cleaned HTML length: ${cleanedHtml.length}`);
+  
+  const markdown = turndownService.turndown(cleanedHtml);
   console.log(`[Research] Converted HTML to Markdown: ${markdown.substring(0, 200)}...`);
   console.log(`[Research] Markdown content length: ${markdown.length}`);
 
@@ -140,7 +172,7 @@ async function handleSummarize(message: SummarizeTopicMessage) {
   const completion = await OAI.chat.completions.create({
     model: MODEL,
     messages: [
-      { role: "system", content: summarizerPrompt },
+      { role: "system", content: summarizerPrompt(message.topic) },
       { role: "user", content: fullSummary }
     ],
   });
@@ -154,6 +186,7 @@ async function handleSummarize(message: SummarizeTopicMessage) {
       // reset to the newly compacted summary
       summary
     ],
+    remainingIterations: message.remainingIterations,
     type: "reflect",
     topic: message.topic,
     content: summary,
@@ -163,6 +196,14 @@ async function handleSummarize(message: SummarizeTopicMessage) {
 async function handleReflect(message: ReflectTopicMessage) {
   console.log(`[Research] Reflecting on summary for topic: ${message.topic}`);
   console.log(`[Research] Current summary: ${message.content.substring(0, 200)}...`);
+  console.log(`[Research] Remaining iterations: ${message.remainingIterations}`);
+  
+  // Check iteration limit
+  if (message.remainingIterations <= 0) {
+    console.log(`[Research] No iterations remaining. Writing final summary to bucket.`);
+    await researchBucket.file(message.topic).write(message.content);
+    return;
+  }
   
   // Here I want to use the reflection prompt I have to restart the research chain
   const completion = await OAI.chat.completions.create({
@@ -185,6 +226,7 @@ async function handleReflect(message: ReflectTopicMessage) {
     console.log(`[Research] Found knowledge gap: ${reflection.knowledge_gap}\nFollowing up with: ${reflection.follow_up_query}`);
     await researchTopicPub.publish({
       ...message,
+      remainingIterations: message.remainingIterations - 1,
       type: "create_query",
       topic: reflection.follow_up_query,
       date: new Date().toISOString(),
@@ -199,10 +241,12 @@ async function handleReflect(message: ReflectTopicMessage) {
 
 researchApi.post("/query", async (ctx) => {
   const query = ctx.req.text();
+  const remainingIterations = MAX_ITERATIONS; // Set the iteration limit here
 
   // Submit off start of research chain
   await researchTopicPub.publish({
     summaries: [],
+    remainingIterations,
     type: "create_query",
     date: new Date().toISOString(),
     topic: `Query for ${query}`

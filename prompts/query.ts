@@ -24,5 +24,5 @@ Example output:
 }
 </EXAMPLE>
 
-Provide your response in JSON format:
+Provide your response only in JSON format:
 `
