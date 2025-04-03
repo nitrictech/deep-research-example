@@ -50,7 +50,8 @@ type TopicMessageTypes = "create_query" | "query" | "reflect" | "summarize";
 
 interface ResearchTopicMessage<T extends TopicMessageTypes> {
   type: T;
-  topic: string;
+  // List of topics that have been researched
+  topics: string[];
   // Build a list of previous summaries to be used to build up the final response
   summaries: string[];
   // Track remaining iterations to prevent infinite loops
@@ -60,6 +61,7 @@ interface ResearchTopicMessage<T extends TopicMessageTypes> {
 interface CreateQueryTopicMessage extends ResearchTopicMessage<"create_query"> {
   type: "create_query";
   date: string;
+  originalTopic: string;
 }
 
 interface PerformQueryTopicMessage extends ResearchTopicMessage<"query"> {
@@ -91,13 +93,13 @@ const MODEL = "llama3.2:3b";
 const MAX_ITERATIONS = 3;
 
 async function handleCreateQuery(message: CreateQueryTopicMessage) {
-  console.log(`[Research] Starting new query for topic: ${message.topic}`);
+  console.log(`[Research] Starting new query for topic: ${message.originalTopic}`);
   // Create a new query using ollama
   const completion = await OAI.chat.completions.create({
     model: MODEL,
     messages: [
-      { role: "system", content: queryPrompt(new Date().toISOString(), message.topic) },
-      { role: "user", content: message.topic }
+      { role: "system", content: queryPrompt(new Date().toISOString(), message.originalTopic) },
+      { role: "user", content: message.originalTopic }
     ],
   });
 
@@ -113,7 +115,7 @@ async function handleCreateQuery(message: CreateQueryTopicMessage) {
   await researchTopicPub.publish({
     ...message,
     type: "query",
-    topic: message.topic,
+    topics: [...message.topics, query],
     query: {
       query,
       rationale,
@@ -148,13 +150,12 @@ async function handleQuery(message: PerformQueryTopicMessage) {
   await researchTopicPub.publish({
     ...message,
     type: "summarize",
-    topic: message.topic,
     content: markdown,
   });
 }
 
 async function handleSummarize(message: SummarizeTopicMessage) {
-  console.log(`[Research] Summarizing content for topic: ${message.topic}`);
+  console.log(`[Research] Summarizing content for topic: ${message.topics[message.topics.length - 1]}`);
   // append message content to previous summaries
   const summaries = [
     ...message.summaries,
@@ -172,7 +173,7 @@ async function handleSummarize(message: SummarizeTopicMessage) {
   const completion = await OAI.chat.completions.create({
     model: MODEL,
     messages: [
-      { role: "system", content: summarizerPrompt(message.topic) },
+      { role: "system", content: summarizerPrompt(message.topics) },
       { role: "user", content: fullSummary }
     ],
   });
@@ -187,21 +188,26 @@ async function handleSummarize(message: SummarizeTopicMessage) {
       summary
     ],
     remainingIterations: message.remainingIterations,
+    topics: [...message.topics, message.topics[message.topics.length - 1]],
     type: "reflect",
-    topic: message.topic,
     content: summary,
   });
 }
 
 async function handleReflect(message: ReflectTopicMessage) {
-  console.log(`[Research] Reflecting on summary for topic: ${message.topic}`);
+  console.log(`[Research] Reflecting on summary for topics: ${message.topics}`);
   console.log(`[Research] Current summary: ${message.content.substring(0, 200)}...`);
   console.log(`[Research] Remaining iterations: ${message.remainingIterations}`);
   
   // Check iteration limit
   if (message.remainingIterations <= 0) {
     console.log(`[Research] No iterations remaining. Writing final summary to bucket.`);
-    await researchBucket.file(message.topic).write(message.content);
+    // Combine all summaries with clear topic separation
+    const finalSummary = message.summaries.map((summary, index) => 
+      `## Research Topic: ${message.topics[index]}\n${summary}`
+    ).join('\n\n');
+    
+    await researchBucket.file(message.topics[0]).write(finalSummary);
     return;
   }
   
@@ -209,13 +215,12 @@ async function handleReflect(message: ReflectTopicMessage) {
   const completion = await OAI.chat.completions.create({
     model: MODEL,
     messages: [
-      { role: "system", content: reflectionPrompt(message.topic) },
+      { role: "system", content: reflectionPrompt(message.topics) },
       { role: "user", content: message.content }
     ],
   });
 
-  // log out the provided content
-  console.log(`[Research] Provided content: ${completion.choices[0].message.content!}`);
+  console.log(`[Research] Parsing reflection:`, completion.choices[0].message.content!);
 
   // Parse the reflection response
   const reflection = JSON.parse(completion.choices[0].message.content!);
@@ -228,20 +233,25 @@ async function handleReflect(message: ReflectTopicMessage) {
       ...message,
       remainingIterations: message.remainingIterations - 1,
       type: "create_query",
-      topic: reflection.follow_up_query,
+      topics: [...message.topics],
+      originalTopic: reflection.follow_up_query,
       date: new Date().toISOString(),
     });
   } else {
-    console.log(`[Research] No knowledge gaps found. Writing final summary to bucket: ${message.topic}`);
-    console.log(`[Research] Final summary length: ${message.content.length}`);
-    // write the summary to a nitric bucket
-    await researchBucket.file(message.topic).write(message.content);
+    console.log(`[Research] No knowledge gaps found. Writing final summary to bucket: ${message.topics[message.topics.length - 1]}`);
+    // Combine all summaries with clear topic separation
+    const finalSummary = message.summaries.map((summary, index) => 
+      `## Research Topic: ${message.topics[index]}\n${summary}`
+    ).join('\n\n');
+    
+    console.log(`[Research] Final summary length: ${finalSummary.length}`);
+    await researchBucket.file(message.topics[0]).write(finalSummary);
   }
 }
 
 researchApi.post("/query", async (ctx) => {
   const query = ctx.req.text();
-  const remainingIterations = MAX_ITERATIONS; // Set the iteration limit here
+  const remainingIterations = MAX_ITERATIONS;
 
   // Submit off start of research chain
   await researchTopicPub.publish({
@@ -249,7 +259,8 @@ researchApi.post("/query", async (ctx) => {
     remainingIterations,
     type: "create_query",
     date: new Date().toISOString(),
-    topic: `Query for ${query}`
+    topics: [],
+    originalTopic: query,
   });
 
   ctx.res.body = "Query submitted";

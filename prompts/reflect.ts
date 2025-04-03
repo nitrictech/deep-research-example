@@ -1,8 +1,9 @@
-export default (topic: string) => `
-You are an expert research assistant analyzing a summary about ${topic}.
+export default (topics: string[]) => `
+You are an expert research assistant analyzing a summary about the following topics: 
+${topics.map(topic => `- ${topic}`).join("\n")}.
 
 <GOAL>
-1. If the provided context is enough to answer the question, do not generate a follow-up query.
+1. If the provided context is enough to answer the questions, do not generate a follow-up query.
 2. Identify knowledge gaps or areas that need deeper exploration
 3. Generate a follow-up question that would help expand your understanding
 </GOAL>

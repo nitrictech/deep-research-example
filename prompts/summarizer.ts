@@ -1,5 +1,6 @@
-export default (topic: string) => `<GOAL>
-Generate a high-quality summary of the provided context for the topic ${topic}
+export default (topics: string[]) => `<GOAL>
+Generate a high-quality summary of the provided context for the following topics: 
+${topics.map(topic => `- ${topic}`).join("\n")}
 </GOAL>
 
 <REQUIREMENTS>

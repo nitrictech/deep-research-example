@@ -11,7 +11,7 @@ ${topic}
 </TOPIC>
 
 <FORMAT>
-Format your response as a JSON object with ALL three of these exact keys:
+Format your response as a JSON object with ALL two of these exact keys:
    - "query": The actual search query string
    - "rationale": Brief explanation of why this query is relevant
 </FORMAT>
