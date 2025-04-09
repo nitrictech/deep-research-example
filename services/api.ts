@@ -135,46 +135,35 @@ async function handleQuery(message: PerformQueryTopicMessage) {
     html: result[0]?.html.substring(0, 200) + '...'
   });
 
-  // Clean and convert HTML to markdown
-  console.log(`[Research] Converting HTML to Markdown for URL: ${result[0]?.url}`);
-  console.log(`[Research] Original HTML length: ${result[0]?.html.length}`);
-  
-  const cleanedHtml = cleanHtml(result[0]?.html);
-  console.log(`[Research] Cleaned HTML length: ${cleanedHtml.length}`);
-  
-  const markdown = turndownService.turndown(cleanedHtml);
-  console.log(`[Research] Converted HTML to Markdown: ${markdown.substring(0, 200)}...`);
-  console.log(`[Research] Markdown content length: ${markdown.length}`);
+  const content = result.reduce((acc, curr) => {
+    const cleanedContent = cleanHtml(curr.html);
+    return `${acc}
+
+  # ${curr.title}
+  ${turndownService.turndown(cleanedContent)}
+`;
+  }, "");
 
   // publish a summarize request to the research service
   await researchTopicPub.publish({
     ...message,
     type: "summarize",
-    content: markdown,
+    content: content,
   });
 }
 
 async function handleSummarize(message: SummarizeTopicMessage) {
   console.log(`[Research] Summarizing content for topic: ${message.topics[message.topics.length - 1]}`);
-  // append message content to previous summaries
-  const summaries = [
-    ...message.summaries,
-    message.content,
-  ];
-
+  
   console.log(`[Research] Previous summaries count: ${message.summaries.length}`);
   console.log(`[Research] Current content length: ${message.content.length}`);
 
-  // reduce summaries into a single string
-  const fullSummary = summaries.join("\n");
-  console.log(`[Research] Combined summary length: ${fullSummary.length}`);
-  
-  // summarize the given content
+  // Process the current content in isolation
   const completion = await OAI.chat.completions.create({
     model: MODEL,
     messages: [
-      { role: "system", content: summarizerPrompt(message.topics) },
-      { role: "user", content: fullSummary }
+      { role: "system", content: summarizerPrompt([message.topics[message.topics.length - 1]]) },
+      { role: "user", content: message.content }
     ],
   });
 
@@ -184,7 +173,8 @@ async function handleSummarize(message: SummarizeTopicMessage) {
   // publish a reflect request to the research service
   await researchTopicPub.publish({
     summaries: [
-      // reset to the newly compacted summary
+      // Keep all previous summaries and add the new one
+      ...message.summaries,
       summary
     ],
     remainingIterations: message.remainingIterations,
@@ -202,10 +192,20 @@ async function handleReflect(message: ReflectTopicMessage) {
   // Check iteration limit
   if (message.remainingIterations <= 0) {
     console.log(`[Research] No iterations remaining. Writing final summary to bucket.`);
-    // Combine all summaries with clear topic separation
-    const finalSummary = message.summaries.map((summary, index) => 
-      `## Research Topic: ${message.topics[index]}\n${summary}`
-    ).join('\n\n');
+    // Create a more comprehensive final summary with proper structure
+    const finalSummary = `# Research Summary: ${message.topics[0]}
+
+## Introduction
+This document contains research findings on the topic "${message.topics[0]}". The research was conducted through multiple iterations of querying, analyzing, and synthesizing information.
+
+## Research Findings
+${message.summaries.map((summary, index) => 
+  `### Research Topic: ${message.topics[index]}\n\n${summary}`
+).join('\n\n')}
+
+## Conclusion
+This research provides a comprehensive overview of "${message.topics[0]}" and related topics. The findings are based on multiple sources and have been synthesized to provide a coherent understanding of the subject matter.
+`;
     
     await researchBucket.file(message.topics[0]).write(finalSummary);
     return;
@@ -223,9 +223,6 @@ async function handleReflect(message: ReflectTopicMessage) {
   console.log(`[Research] Parsing reflection:`, completion.choices[0].message.content!);
 
   const reflection = completion.choices[0].message.content!;
-  // Parse the reflection response
-  // const reflection = JSON.parse(completion.choices[0].message.content!);
-  // console.log(`[Research] Reflection analysis:`, reflection);
   
   // Only restart research if knowledge gaps were identified
   if (reflection !== "") {
@@ -240,10 +237,20 @@ async function handleReflect(message: ReflectTopicMessage) {
     });
   } else {
     console.log(`[Research] No knowledge gaps found. Writing final summary to bucket: ${message.topics[message.topics.length - 1]}`);
-    // Combine all summaries with clear topic separation
-    const finalSummary = message.summaries.map((summary, index) => 
-      `## Research Topic: ${message.topics[index]}\n${summary}`
-    ).join('\n\n');
+    // Create a more comprehensive final summary with proper structure
+    const finalSummary = `# Research Summary: ${message.topics[0]}
+
+## Introduction
+This document contains research findings on the topic "${message.topics[0]}". The research was conducted through multiple iterations of querying, analyzing, and synthesizing information.
+
+## Research Findings
+${message.summaries.map((summary, index) => 
+  `### Research Topic: ${message.topics[index]}\n\n${summary}`
+).join('\n\n')}
+
+## Conclusion
+This research provides a comprehensive overview of "${message.topics[0]}" and related topics. The findings are based on multiple sources and have been synthesized to provide a coherent understanding of the subject matter.
+`;
     
     console.log(`[Research] Final summary length: ${finalSummary.length}`);
     await researchBucket.file(message.topics[0]).write(finalSummary);

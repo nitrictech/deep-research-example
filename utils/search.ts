@@ -1,10 +1,10 @@
 import { search, SafeSearchType } from "duck-duck-scrape";
 
-export default async (query: string) => {
+export default async (query: string, topN: number = 3) => {
   const results = await search(query, { safeSearch: SafeSearchType.STRICT });
   
   // Get the top 3 most relevant results
-  const topResults = results.results.slice(0, 3);
+  const topResults = results.results.slice(0, topN);
   
   // Fetch HTML content for each result
   const htmlContents = await Promise.all(

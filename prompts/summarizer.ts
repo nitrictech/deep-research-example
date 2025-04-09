@@ -4,19 +4,11 @@ ${topics.map(topic => `- ${topic}`).join("\n")}
 </GOAL>
 
 <REQUIREMENTS>
-When creating a NEW summary:
+When creating a summary:
 1. Highlight the most relevant information related to the user topic from the search results
 2. Ensure a coherent flow of information
-
-When EXTENDING an existing summary:                                                                                                                 
-1. Read the existing summary and new search results carefully.                                                    
-2. Compare the new information with the existing summary.                                                         
-3. For each piece of new information:                                                                             
-    a. If it's related to existing points, integrate it into the relevant paragraph.                               
-    b. If it's entirely new but relevant, add a new paragraph with a smooth transition.                            
-    c. If it's not relevant to the user topic, skip it.                                                            
-4. Ensure all additions are relevant to the user's topic.                                                         
-5. Verify that your final output differs from the input summary.                                                                                                                                                            
+3. Do not include any preamble or titles in your response.
+4. Do not include a conclusion section in your response.                                                                                                                                                        
 < /REQUIREMENTS >
 
 < FORMATTING >
